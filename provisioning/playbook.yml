@@ -1,0 +1,230 @@
+---
+- hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+  - name: Accept login with password from sshd
+    ansible.builtin.lineinfile:
+      path: /etc/ssh/sshd_config
+      regexp: '^PasswordAuthentication no$'
+      line: 'PasswordAuthentication yes'
+      state: present
+    notify:
+      - Restart sshd
+
+  - name: Set timezone
+    community.general.timezone:
+      name: Europe/Moscow
+
+  - name: List all files in directory /etc/yum.repos.d/*.repo
+    find:
+      paths: "/etc/yum.repos.d/"
+      patterns: "*.repo"
+    register: repos
+    when: (ansible_os_family == "RedHat")
+
+  - name: Comment mirrorlist /etc/yum.repos.d/CentOS-*
+    ansible.builtin.lineinfile:
+      backrefs: true
+      path: "{{ item.path }}"
+      regexp: '^(mirrorlist=.+)'
+      line: '#\1'
+    with_items: "{{ repos.files }}"
+    when: (ansible_os_family == "RedHat")
+
+  - name: Replace baseurl
+    ansible.builtin.lineinfile:
+      backrefs: true
+      path: "{{ item.path }}"
+      regexp: '^#baseurl=http:\/\/mirror.centos.org(.+)'
+      line: 'baseurl=http://vault.centos.org\1'
+    with_items: "{{ repos.files }}"
+    when: (ansible_os_family == "RedHat")
+
+  - name: set up forward packages across routers
+    sysctl:
+      name: net.ipv4.conf.all.forwarding
+      value: '1'
+      state: present
+    when: "'routers' in group_names"
+
+  - name: Install epel-release
+    ansible.builtin.yum:
+      name: epel-release
+      state: present
+    when: (ansible_os_family == "RedHat")
+
+  - name: Install soft on RedHat-based OS
+    ansible.builtin.yum:
+      name:
+        - vim
+        - tcpdump
+        - traceroute
+        - net-tools
+      state: present
+      update_cache: true
+    when: (ansible_os_family == "RedHat")
+
+  - name: Install soft on Debian-based OS
+    ansible.builtin.apt:
+      name:
+        - vim
+        - tcpdump
+        - traceroute
+        - net-tools
+      state: present
+      update_cache: true
+    when: (ansible_os_family == "Debian")
+
+  - name: Set up vlan1 on testClent1 & testServer1 (CentOS)
+    ansible.builtin.template:
+      src: ifcfg-vlan1.j2
+      dest: /etc/sysconfig/network-scripts/ifcfg-vlan1
+      owner: root
+      group: root
+      mode: '0644'
+    notify: Restart NetworkManager
+    when: (ansible_hostname == 'testClient1' or ansible_hostname == 'testServer1')
+
+  - name: Set up vlan2 on testClient2 & testServer2 (Ubuntu)
+    ansible.builtin.template:
+      src: 50-cloud-init.yaml.j2
+      dest: /etc/netplan/50-cloud-init.yaml
+      owner: root
+      group: root
+      mode: '0644'
+    notify: Netplan apply
+    when: (ansible_hostname == 'testClient2' or ansible_hostname == 'testServer2')
+
+  - name: Configure eth1 and eth2 interfaces on inetRouter & centralRouter
+    ansible.builtin.template:
+      src: ifcfg-.j2
+      dest: /etc/sysconfig/network-scripts/ifcfg-{{ item }}
+      owner: root
+      group: root
+      mode: '0644'
+    with_items:
+      - eth1
+      - eth2
+    notify: Restart NetworkManager
+    when: (ansible_hostname == 'inetRouter' or ansible_hostname == 'centralRouter')
+
+  - name: Set up ifcfg-bond0
+    ansible.builtin.template:
+      src: ifcfg-bond0.j2
+      dest: /etc/sysconfig/network-scripts/ifcfg-bond0
+      owner: root
+      group: root
+      mode: '0644'
+    notify:
+      - Reboot the system
+      - Gateway configure on centralRouter
+      - Add routes on inetRouter
+    when: (ansible_hostname == 'inetRouter' or ansible_hostname == 'centralRouter')
+
+  - name: Disable default route on eth0 interface
+    community.general.nmcli:
+      conn_name: System eth0
+      type: ethernet
+      ifname: eth0
+      gw4_ignore_auto: true
+      state: present
+    when: (ansible_hostname != "inetRouter" and ansible_os_family == "RedHat")
+    notify:
+      - Eth0 connect
+
+  - name: Gateway configure on office1Router
+    community.general.nmcli:
+      conn_name: System eth1
+      type: ethernet
+      ifname: eth1
+      gw4: "192.168.255.9"
+      state: present
+    notify:
+      - Eth1 connect
+    when: (ansible_hostname == "office1Router")
+
+  - name: Copy vlan configs on office1Rouer
+    ansible.builtin.copy:
+      src: files/office1Router/{{ item }}
+      dest: /etc/sysconfig/network-scripts/{{ item }}
+    notify: Restart NetworkManager
+    with_items:
+      - ifcfg-eth2.2
+      - ifcfg-eth2.5
+    when: (ansible_hostname == "office1Router")
+
+  - name: Copy nftables config on office1Router
+    ansible.builtin.copy:
+      src: files/office1Router/nftables.conf
+      dest: /etc/nftables.conf
+    notify:
+      - Configure nftables
+    when: (ansible_hostname == "office1Router")
+
+  - name: Copy nftables config on inetRouter
+    ansible.builtin.copy:
+      src: files/inetRouter-nftables.conf
+      dest: /etc/nftables.conf
+    notify:
+      - Configure nftables
+    when: (ansible_hostname == "inetRouter")
+
+  handlers:
+
+  - name: Restart sshd
+    ansible.builtin.service:
+      name: sshd
+      state: restarted
+
+  - name: Eth0 connect
+    command: nmcli connection up 'System eth0'
+
+  - name: Eth1 connect
+    command: nmcli connection up 'System eth1'
+
+  - name: Restart NetworkManager
+    ansible.builtin.service:
+      name: NetworkManager
+      state: restarted
+
+  - name: Netplan apply
+    ansible.builtin.command: netplan apply
+
+  - name: Reboot the system
+    ansible.builtin.reboot:
+
+  - name: Gateway configure on centralRouter
+    community.general.nmcli:
+      conn_name: bond0
+      type: 'bond'
+      mode: "active-backup"
+      gw4: "192.168.255.1"
+      state: present
+    notify:
+      - Bond0 connect
+    when: (ansible_hostname == "centralRouter")
+
+  - name: Add routes on inetRouter
+    ansible.builtin.command: nmcli connection modify bond0 +ipv4.routes "192.168.255.8/30 192.168.255.2"
+    notify: Bond0 connect
+    when: ansible_hostname == 'inetRouter'
+
+  - name: Bond0 connect
+    command: nmcli connection up 'bond0'
+
+  - name: Configure nftables
+    ansible.builtin.lineinfile:
+      path: /etc/sysconfig/nftables.conf
+      line: 'include "/etc/nftables.conf"'
+      state: present
+    notify:
+      - Restart nftables service
+
+  - name: Restart nftables service
+    ansible.builtin.service:
+      name: nftables
+      enabled: true
+      state: restarted
+

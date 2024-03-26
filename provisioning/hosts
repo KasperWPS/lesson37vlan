@@ -1,0 +1,12 @@
+[routers]
+inetRouter ansible_host=192.168.56.10 ansible_user=vagrant ansible_ssh_private_key_file=~/.vagrant.d/insecure_private_keys/vagrant.key.rsa bond_ip=192.168.255.1
+centralRouter ansible_host=192.168.56.11 ansible_user=vagrant ansible_ssh_private_key_file=~/.vagrant.d/insecure_private_keys/vagrant.key.rsa bond_ip=192.168.255.2
+office1Router ansible_host=192.168.56.20 ansible_user=vagrant ansible_ssh_private_key_file=~/.vagrant.d/insecure_private_keys/vagrant.key.rsa
+
+[servers]
+testServer1 ansible_host=192.168.56.22 ansible_user=vagrant ansible_ssh_private_key_file=~/.vagrant.d/insecure_private_keys/vagrant.key.rsav vlan_id=5 vlan_ip=10.10.5.1 vlan_gate=10.10.5.10
+testServer2 ansible_host=192.168.56.32 ansible_user=vagrant ansible_ssh_private_key_file=~/.vagrant.d/insecure_private_keys/vagrant.key.rsa vlan_id=2 vlan_ip=10.10.2.1 vlan_gate=10.10.2.10
+
+[clients]
+testClient1 ansible_host=192.168.56.21 ansible_user=vagrant ansible_ssh_private_key_file=~/.vagrant.d/insecure_private_keys/vagrant.key.rsa vlan_id=5 vlan_ip=10.10.5.254 vlan_gate=10.10.5.10
+testClient2 ansible_host=192.168.56.31 ansible_user=vagrant ansible_ssh_private_key_file=~/.vagrant.d/insecure_private_keys/vagrant.key.rsa vlan_id=2 vlan_ip=10.10.2.254 vlan_gate=10.10.2.10
